@@ -163,6 +163,11 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
       Pattern.compile("CODECS=" + ATTR_QUOTED_STRING_VALUE_PATTERN);
   private static final Pattern REGEX_SUPPLEMENTAL_CODECS =
       Pattern.compile("SUPPLEMENTAL-CODECS=" + ATTR_QUOTED_STRING_VALUE_PATTERN);
+  private static final Pattern REGEX_MIME = Pattern.compile("MIME=\"(.+?)\"");
+  private static final Pattern REGEX_CACHED = Pattern.compile("CACHED=\"(.+?)\"");
+  private static final Pattern REGEX_DOC_ID = Pattern.compile("DOCID=\"(.+?)\"");
+  private static final Pattern REGEX_DOC_FILENAME = Pattern.compile("DOCFILENAME=\"(.+?)\"");
+  private static final Pattern REGEX_ACCOUNT = Pattern.compile("ACCOUNT=\"(.+?)\"");
   private static final Pattern REGEX_RESOLUTION = Pattern.compile("RESOLUTION=(\\d+x\\d+)");
   private static final Pattern REGEX_FRAME_RATE = Pattern.compile("FRAME-RATE=([\\d\\.]+)\\b");
   private static final Pattern REGEX_SCORE = Pattern.compile("SCORE=([\\d\\.]+)\\b");
@@ -550,6 +555,11 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
           codecs = nonVideoCodecs != null ? videoCodecs + "," + nonVideoCodecs : videoCodecs;
         }
 
+        String mime = parseOptionalStringAttr(line, REGEX_MIME, variableDefinitions);
+        boolean cached = TextUtils.equals(parseOptionalStringAttr(line, REGEX_CACHED, variableDefinitions), "true");
+        String documentId = parseOptionalStringAttr(line, REGEX_DOC_ID, variableDefinitions);
+        String documentFilename = parseOptionalStringAttr(line, REGEX_DOC_FILENAME, variableDefinitions);
+        String currentAccount = parseOptionalStringAttr(line, REGEX_ACCOUNT, variableDefinitions);
         String resolutionString =
             parseOptionalStringAttr(line, REGEX_RESOLUTION, variableDefinitions, matcherCache);
         int width;
@@ -613,6 +623,7 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
                 .setId(variants.size())
                 .setContainerMimeType(MimeTypes.APPLICATION_M3U8)
                 .setCodecs(codecs)
+                .setSampleMimeType(mime)
                 .setAverageBitrate(averageBitrate)
                 .setPeakBitrate(peakBitrate)
                 .setWidth(width)
@@ -621,6 +632,10 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
                 .setSelectionPriority(selectionPriority)
                 .setRoleFlags(roleFlags)
                 .setColorInfo(colorInfo)
+                .setCached(cached)
+                .setDocumentId(documentId)
+                .setDocumentFilename(documentFilename)
+                .setCurrentAccount(currentAccount)
                 .build();
         Variant variant =
             new Variant(
