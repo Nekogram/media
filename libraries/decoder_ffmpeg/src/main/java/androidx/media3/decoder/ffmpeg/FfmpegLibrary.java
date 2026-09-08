@@ -35,14 +35,6 @@ public final class FfmpegLibrary {
 
   private static final String TAG = "FfmpegLibrary";
 
-  private static final LibraryLoader LOADER =
-      new LibraryLoader("ffmpegJNI") {
-        @Override
-        protected void loadLibrary(String name) {
-          System.loadLibrary(name);
-        }
-      };
-
   private static @MonotonicNonNull String version;
   private static int inputBufferPaddingSize = C.LENGTH_UNSET;
 
@@ -57,12 +49,12 @@ public final class FfmpegLibrary {
    * @param libraries The names of the FFmpeg native libraries.
    */
   public static void setLibraries(String... libraries) {
-    LOADER.setLibraries(libraries);
+
   }
 
   /** Returns whether the underlying library is available, loading it if necessary. */
   public static boolean isAvailable() {
-    return LOADER.isAvailable();
+    return true;
   }
 
   /** Returns the version of the underlying library if available, or null otherwise. */
