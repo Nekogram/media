@@ -555,11 +555,11 @@ public final class HlsPlaylistParser implements ParsingLoadable.Parser<HlsPlayli
           codecs = nonVideoCodecs != null ? videoCodecs + "," + nonVideoCodecs : videoCodecs;
         }
 
-        String mime = parseOptionalStringAttr(line, REGEX_MIME, variableDefinitions);
-        boolean cached = TextUtils.equals(parseOptionalStringAttr(line, REGEX_CACHED, variableDefinitions), "true");
-        String documentId = parseOptionalStringAttr(line, REGEX_DOC_ID, variableDefinitions);
-        String documentFilename = parseOptionalStringAttr(line, REGEX_DOC_FILENAME, variableDefinitions);
-        String currentAccount = parseOptionalStringAttr(line, REGEX_ACCOUNT, variableDefinitions);
+        String mime = parseOptionalStringAttr(line, REGEX_MIME, variableDefinitions, matcherCache);
+        boolean cached = TextUtils.equals(parseOptionalStringAttr(line, REGEX_CACHED, variableDefinitions, matcherCache), "true");
+        String documentId = parseOptionalStringAttr(line, REGEX_DOC_ID, variableDefinitions, matcherCache);
+        String documentFilename = parseOptionalStringAttr(line, REGEX_DOC_FILENAME, variableDefinitions, matcherCache);
+        String currentAccount = parseOptionalStringAttr(line, REGEX_ACCOUNT, variableDefinitions, matcherCache);
         String resolutionString =
             parseOptionalStringAttr(line, REGEX_RESOLUTION, variableDefinitions, matcherCache);
         int width;
