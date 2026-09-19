@@ -256,6 +256,7 @@ import java.util.concurrent.Executor;
   // Playback information when there is a pending seek/set source operation.
   private int maskingWindowIndex;
   private long maskingWindowPositionMs;
+  private long lastReturnedPositionUs;
   private Executor workerQueue;
 
   @SuppressLint("HandlerLeak")
@@ -319,6 +320,7 @@ import java.util.concurrent.Executor;
       this.applicationLooper = builder.looper;
       this.clock = builder.clock;
       this.wrappingPlayer = wrappingPlayer == null ? this : wrappingPlayer;
+      this.lastReturnedPositionUs = C.TIME_UNSET;
       listeners =
           new ListenerSet<>(
               applicationLooper,
@@ -1035,7 +1037,9 @@ import java.util.concurrent.Executor;
     if (playbackInfo.playbackParameters.equals(playbackParameters)) {
       return;
     }
-    PlaybackInfo newPlaybackInfo = playbackInfo.copyWithPlaybackParameters(playbackParameters);
+    PlaybackInfo newPlaybackInfo =
+        maybeMaskPositionWithEstimate(playbackInfo, clock.elapsedRealtime());
+    newPlaybackInfo = newPlaybackInfo.copyWithPlaybackParameters(playbackParameters);
     pendingOperationAcks++;
     internalPlayer.setPlaybackParameters(playbackParameters);
     updatePlaybackInfo(
@@ -1173,9 +1177,7 @@ import java.util.concurrent.Executor;
     listeners.release();
     playbackInfoUpdateHandler.removeCallbacksAndMessages(null);
     bandwidthMeter.removeEventListener(analyticsCollector);
-    if (playbackInfo.sleepingForOffload) {
-      playbackInfo = playbackInfo.copyWithEstimatedPosition();
-    }
+    playbackInfo = maybeMaskPositionWithEstimate(playbackInfo, clock.elapsedRealtime());
     playbackInfo = maskPlaybackState(playbackInfo, Player.STATE_IDLE);
     playbackInfo = playbackInfo.copyWithLoadingMediaPeriodId(playbackInfo.periodId);
     playbackInfo.bufferedPositionUs = playbackInfo.positionUs;
@@ -2169,6 +2171,7 @@ import java.util.concurrent.Executor;
   private void stopInternal(@Nullable ExoPlaybackException error) {
     PlaybackInfo playbackInfo =
         this.playbackInfo.copyWithLoadingMediaPeriodId(this.playbackInfo.periodId);
+    playbackInfo = maybeMaskPositionWithEstimate(playbackInfo, clock.elapsedRealtime());
     playbackInfo.bufferedPositionUs = playbackInfo.positionUs;
     playbackInfo.totalBufferedDurationUs = 0;
     playbackInfo = maskPlaybackState(playbackInfo, Player.STATE_IDLE);
@@ -2214,9 +2217,17 @@ import java.util.concurrent.Executor;
     }
 
     long positionUs =
-        playbackInfo.sleepingForOffload
-            ? playbackInfo.getEstimatedPositionUs()
+        playbackInfo.useEstimatedPosition
+            ? playbackInfo.getEstimatedPositionUs(clock.elapsedRealtime())
             : playbackInfo.positionUs;
+
+    if (playbackInfo == this.playbackInfo) {
+      if (lastReturnedPositionUs != C.TIME_UNSET && positionUs < lastReturnedPositionUs) {
+        positionUs = lastReturnedPositionUs;
+      } else {
+        lastReturnedPositionUs = positionUs;
+      }
+    }
 
     if (playbackInfo.periodId.isAd()) {
       return positionUs;
@@ -2305,6 +2316,11 @@ import java.util.concurrent.Executor;
     PlaybackInfo previousPlaybackInfo = this.playbackInfo;
     PlaybackInfo newPlaybackInfo = playbackInfo;
     this.playbackInfo = playbackInfo;
+
+    if (positionDiscontinuity || hasPeriodChanged(newPlaybackInfo, previousPlaybackInfo)) {
+      lastReturnedPositionUs = C.TIME_UNSET;
+    }
+
     // TODO (b/494325148): Remove assertion.
     if (!playbackInfo.timeline.isEmpty()) {
       checkState(
@@ -2462,6 +2478,25 @@ import java.util.concurrent.Executor;
         listener.onSleepingForOffloadChanged(newPlaybackInfo.sleepingForOffload);
       }
     }
+  }
+
+  private boolean hasPeriodChanged(
+      PlaybackInfo newPlaybackInfo, PlaybackInfo previousPlaybackInfo) {
+    if (!previousPlaybackInfo.periodId.equals(newPlaybackInfo.periodId)) {
+      return true;
+    }
+    // Detect if we are transitioning from a placeholder period to a real period.
+    if (!previousPlaybackInfo.timeline.isEmpty() && !newPlaybackInfo.timeline.isEmpty()) {
+      boolean wasPlaceholder =
+          previousPlaybackInfo.timeline.getPeriodByUid(
+                  previousPlaybackInfo.periodId.periodUid, period)
+              .isPlaceholder;
+      boolean isPlaceholder =
+          newPlaybackInfo.timeline.getPeriodByUid(newPlaybackInfo.periodId.periodUid, period)
+              .isPlaceholder;
+      return wasPlaceholder && !isPlaceholder;
+    }
+    return false;
   }
 
   private PositionInfo getPreviousPositionInfo(
@@ -2791,6 +2826,7 @@ import java.util.concurrent.Executor;
               /* requestedContentPositionUs= */ positionUs,
               /* discontinuityStartPositionUs= */ positionUs,
               /* totalBufferedDurationUs= */ 0,
+              clock.elapsedRealtime(),
               TrackGroupArray.EMPTY,
               emptyTrackSelectorResult,
               /* staticMetadata= */ ImmutableList.of());
@@ -2828,6 +2864,7 @@ import java.util.concurrent.Executor;
               /* requestedContentPositionUs= */ newContentPositionUs,
               /* discontinuityStartPositionUs= */ newContentPositionUs,
               /* totalBufferedDurationUs= */ 0,
+              clock.elapsedRealtime(),
               playingPeriodChanged ? TrackGroupArray.EMPTY : playbackInfo.trackGroups,
               playingPeriodChanged ? emptyTrackSelectorResult : playbackInfo.trackSelectorResult,
               playingPeriodChanged ? ImmutableList.of() : playbackInfo.staticMetadata);
@@ -2854,6 +2891,7 @@ import java.util.concurrent.Executor;
                 /* requestedContentPositionUs= */ playbackInfo.positionUs,
                 playbackInfo.discontinuityStartPositionUs,
                 /* totalBufferedDurationUs= */ maskedBufferedPositionUs - playbackInfo.positionUs,
+                clock.elapsedRealtime(),
                 playbackInfo.trackGroups,
                 playbackInfo.trackSelectorResult,
                 playbackInfo.staticMetadata);
@@ -2878,10 +2916,19 @@ import java.util.concurrent.Executor;
               /* requestedContentPositionUs= */ newContentPositionUs,
               /* discontinuityStartPositionUs= */ newContentPositionUs,
               maskedTotalBufferedDurationUs,
+              clock.elapsedRealtime(),
               playbackInfo.trackGroups,
               playbackInfo.trackSelectorResult,
               playbackInfo.staticMetadata);
       playbackInfo.bufferedPositionUs = maskedBufferedPositionUs;
+    }
+    return playbackInfo;
+  }
+
+  private static PlaybackInfo maybeMaskPositionWithEstimate(
+      PlaybackInfo playbackInfo, long currentElapsedTimeMs) {
+    if (playbackInfo.useEstimatedPosition) {
+      playbackInfo = playbackInfo.copyWithEstimatedPosition(currentElapsedTimeMs);
     }
     return playbackInfo;
   }
@@ -3098,11 +3145,8 @@ import java.util.concurrent.Executor;
       return;
     }
     pendingOperationAcks++;
-    // Position estimation and copy must occur before changing/masking playback state.
     PlaybackInfo newPlaybackInfo =
-        this.playbackInfo.sleepingForOffload
-            ? this.playbackInfo.copyWithEstimatedPosition()
-            : this.playbackInfo;
+        maybeMaskPositionWithEstimate(this.playbackInfo, clock.elapsedRealtime());
     newPlaybackInfo =
         newPlaybackInfo.copyWithPlayWhenReady(
             playWhenReady, playWhenReadyChangeReason, playbackSuppressionReason);
