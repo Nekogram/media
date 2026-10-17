@@ -17,17 +17,6 @@ plugins { id("media3.android-library") }
 android {
   namespace = "androidx.media3.effect.ndk"
 
-  defaultConfig {
-    externalNativeBuild {
-      cmake {
-        arguments.add("-DANDROID_WEAK_API_DEFS=ON")
-        arguments.add("-Werror=unguarded-availability")
-        targets.add("hardwareBufferJNI")
-      }
-    }
-  }
-  externalNativeBuild { cmake { path = file("src/main/jni/CMakeLists.txt") } }
-
   sourceSets {
     getByName("androidTest").assets.directories.add("../test_data/src/test/assets/")
     getByName("test").assets.directories.add("../test_data/src/test/assets/")
